@@ -1,0 +1,166 @@
+import { relations } from "drizzle-orm";
+import {
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+/**
+ * SpecBoard data model. Spec *content* is canonical in git; this DB holds the
+ * *metadata* (status/assignment/priority/ordering) plus a cached index of spec
+ * content for fast boards and querying. Every tenant-scoped row carries
+ * `workspaceId` so Postgres RLS can isolate tenants (see migrations).
+ */
+
+export const memberRole = pgEnum("member_role", ["admin", "pm", "ux", "eng", "viewer"]);
+
+/** Tenant root. SaaS has many; a self-host install typically has one. */
+export const workspaces = pgTable("workspaces", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const members = pgTable(
+  "members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // References the auth provider's user id (e.g. Supabase auth.users.id).
+    userId: uuid("user_id").notNull(),
+    role: memberRole("role").notNull().default("viewer"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("members_workspace_user_uq").on(t.workspaceId, t.userId)],
+);
+
+/** A connected GitHub repository (via the GitHub App installation). */
+export const repositories = pgTable(
+  "repositories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    githubInstallationId: text("github_installation_id").notNull(),
+    owner: text("owner").notNull(),
+    name: text("name").notNull(),
+    defaultBranch: text("default_branch").notNull().default("main"),
+    /** Parsed `.specboard/config.yml`, refreshed on sync. */
+    config: jsonb("config"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("repositories_owner_name_uq").on(t.workspaceId, t.owner, t.name)],
+);
+
+/**
+ * The metadata record for a spec. Linked to the git spec by `specId`
+ * (matches the `id` frontmatter), NOT by path — so renames never orphan it.
+ */
+export const features = pgTable(
+  "features",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    /** Stable id from the spec's frontmatter; the git<->DB join key. */
+    specId: uuid("spec_id").notNull(),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("backlog"),
+    assigneeId: uuid("assignee_id"),
+    priority: integer("priority"),
+    /** Fractional/lexical rank for manual backlog ordering. */
+    rank: text("rank"),
+    tags: text("tags").array().notNull().default([]),
+    roadmapQuarter: text("roadmap_quarter"),
+    /** Values for team-defined custom fields (see RepoConfig.fields). */
+    customFields: jsonb("custom_fields").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("features_repo_spec_uq").on(t.repoId, t.specId),
+    index("features_workspace_status_idx").on(t.workspaceId, t.status),
+  ],
+);
+
+/** Cached spec content + git pointers, kept in sync by the git service. */
+export const specIndex = pgTable("spec_index", {
+  featureId: uuid("feature_id")
+    .primaryKey()
+    .references(() => features.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  blobSha: text("blob_sha").notNull(),
+  content: text("content").notNull(),
+  /** Parsed structure: { title, sections: [...] }. */
+  parsed: jsonb("parsed"),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const comments = pgTable("comments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  featureId: uuid("feature_id")
+    .notNull()
+    .references(() => features.id, { onDelete: "cascade" }),
+  authorId: uuid("author_id").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const activityLog = pgTable("activity_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  featureId: uuid("feature_id").references(() => features.id, { onDelete: "cascade" }),
+  actorId: uuid("actor_id"),
+  action: text("action").notNull(),
+  detail: jsonb("detail"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const workspaceRelations = relations(workspaces, ({ many }) => ({
+  members: many(members),
+  repositories: many(repositories),
+  features: many(features),
+}));
+
+export const repositoryRelations = relations(repositories, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [repositories.workspaceId],
+    references: [workspaces.id],
+  }),
+  features: many(features),
+}));
+
+export const featureRelations = relations(features, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [features.workspaceId],
+    references: [workspaces.id],
+  }),
+  repository: one(repositories, {
+    fields: [features.repoId],
+    references: [repositories.id],
+  }),
+  index: one(specIndex, {
+    fields: [features.id],
+    references: [specIndex.featureId],
+  }),
+  comments: many(comments),
+}));

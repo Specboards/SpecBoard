@@ -1,0 +1,18 @@
+# SpecBoard per-repo configuration (versioned with your code).
+# Tells SpecBoard where specs live and how this team's workflow/fields are shaped.
+version: 1
+
+# Globs (relative to repo root) that identify spec files.
+specGlobs:
+  - "specs/**/spec.md"
+
+# How UI spec edits are written back to git: "pr" opens a pull request,
+# "direct" commits straight to the branch.
+writeMode: pr
+
+# Custom metadata fields surfaced in the UI (stored in DB jsonb).
+fields:
+  - key: effort
+    label: Effort
+    type: select
+    options: ["XS", "S", "M", "L", "XL"]
