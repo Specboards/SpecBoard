@@ -356,14 +356,26 @@ Notes:
 
 Rough priority order; the first three unblock real multi-user usage.
 
-1. **Sign-in / sign-up UI + session-gated writes.** Auth endpoints exist but
-   there is no browser way to authenticate. Add the pages, then gate
-   `PATCH /api/v1/*` (and future write routes) on
-   `getAuth().api.getSession({ headers })` — today writes are open, matching
-   the pre-auth behavior.
-2. **Workspace bootstrap on first sign-up** — create workspace + admin
-   `members` row; until then signed-up users own nothing and the prod board
-   stays empty (its DB is migrated but intentionally unseeded).
+1. ~~**Sign-in / sign-up UI + session-gated writes.**~~ **Done 2026-06-13.**
+   `/sign-in` + `/sign-up` pages (`components/auth-form.tsx`) backed by a
+   Better Auth browser client (`lib/auth-client.ts`); a session-aware account
+   control in the header (`components/account-control.tsx`). Writes go through
+   `requireWriteAccess` (`lib/auth-session.ts`), which 401s
+   `PATCH /api/v1/*` when auth is enabled and no session is present, and stays
+   open in local file mode (auth disabled). Still open: the metadata form
+   surfaces the 401 as an inline error rather than redirecting to `/sign-in`.
+2. ~~**Workspace bootstrap on first sign-up**~~ **Done 2026-06-13.** One
+   workspace per deployment (the "organization"). The first signed-in user with
+   no workspace is routed to `/setup` to name the org and is made `admin`
+   (`POST /api/v1/workspaces` → `createWorkspaceWithOwner`); every later user is
+   auto-joined as `viewer` by `ensureMembership` (`lib/workspace.ts`), invoked
+   from the page-access gate `requireWorkspaceAccess` (`lib/workspace-access.ts`)
+   which now fronts the backlog/board/roadmap/feature pages. Membership is
+   resolved on first authenticated access rather than via a Better Auth hook —
+   single code path; the post-signup redirect hits it immediately. Pages stay
+   ungated in local file mode. Still open: assigning richer roles
+   (`pm`/`ux`/`eng`) and an admin UI to manage members — everyone past the first
+   is a `viewer` today.
 3. **`specboard_app` non-owner DB role** so RLS actually enforces on the SaaS
    (the app currently connects as the table owner, which bypasses RLS), plus
    a request-scoped db helper that runs `set_config('app.user_id', …, true)`

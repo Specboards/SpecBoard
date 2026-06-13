@@ -14,11 +14,13 @@ import {
   statusLabel,
 } from "@/lib/feature-helpers";
 import { getStore } from "@/lib/store";
+import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
 /** Roadmap: features grouped by quarter, unscheduled work last. */
 export default async function RoadmapPage() {
+  await requireWorkspaceAccess();
   const store = await getStore();
   const features = sortFeatures(await store.listFeatures()).filter(
     (f) => f.status !== "archived",

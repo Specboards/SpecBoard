@@ -13,6 +13,7 @@ import { StatusDot } from "@/components/status-dot";
 import { StatusSelect } from "@/components/status-select";
 import { priorityLabel, sortFeatures } from "@/lib/feature-helpers";
 import { getStore } from "@/lib/store";
+import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export const dynamic = "force-dynamic";
  * only (DB or local file) — spec content stays canonical in git.
  */
 export default async function BacklogPage() {
+  await requireWorkspaceAccess();
   const store = await getStore();
   const features = sortFeatures(await store.listFeatures()).filter(
     (f) => f.status !== "archived",

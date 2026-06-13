@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { requireWriteAccess } from "@/lib/auth-session";
 import {
   FeatureNotFoundError,
   InvalidPatchError,
@@ -29,6 +30,9 @@ export async function GET(_req: Request, { params }: Params) {
  * against the workflow state machine.
  */
 export async function PATCH(req: Request, { params }: Params) {
+  const denied = await requireWriteAccess(req);
+  if (denied) return denied;
+
   const { specId } = await params;
 
   let body: unknown;

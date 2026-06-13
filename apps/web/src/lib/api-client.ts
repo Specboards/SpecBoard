@@ -7,6 +7,15 @@ import type { FeaturePatch } from "@/lib/store/types";
  * through /api/v1 — the same surface external integrations use — so the
  * browser never talks to anything but the versioned API.
  */
+
+/** Thrown when a write is rejected for lack of a session (HTTP 401). */
+export class AuthRequiredError extends Error {
+  constructor() {
+    super("Authentication required.");
+    this.name = "AuthRequiredError";
+  }
+}
+
 export async function patchFeature(
   specId: string,
   patch: FeaturePatch,
@@ -16,8 +25,26 @@ export async function patchFeature(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
+  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
   }
+}
+
+/** Create the organization (first user only). Returns the workspace slug. */
+export async function createWorkspace(name: string): Promise<{ slug: string }> {
+  const res = await fetch("/api/v1/workspaces", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { workspace?: { slug: string }; error?: string }
+    | null;
+  if (!res.ok || !body?.workspace) {
+    throw new Error(body?.error ?? `Workspace creation failed with ${res.status}`);
+  }
+  return body.workspace;
 }

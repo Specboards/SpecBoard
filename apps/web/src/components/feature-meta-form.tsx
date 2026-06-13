@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { patchFeature } from "@/lib/api-client";
+import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -34,6 +34,12 @@ export function FeatureMetaForm({ feature }: { feature: FeatureDetail }) {
         });
         router.refresh();
       } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+          );
+          return;
+        }
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 
+import { AccountControl } from "@/components/account-control";
 import { MainNav } from "@/components/main-nav";
 
 import "./globals.css";
@@ -23,6 +24,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               SpecBoard
             </Link>
             <MainNav />
+            <div className="ml-auto">
+              <AccountControl />
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
