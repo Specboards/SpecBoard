@@ -4,9 +4,9 @@ A lightweight, spec-based product-management layer for **spec-driven development
 
 Your specs stay canonical in git (versioned with code, read by AI coding agents).
 SpecBoard layers the product metadata — status, assignment, priority, backlog
-order, roadmap, dependencies — **on top** of them, so PM, UX, and engineering
-collaborate without editing files in a terminal and without duplicating work
-into JIRA/Aha.
+order, roadmap, dependencies, epic/sub-feature hierarchy — **on top** of them,
+so PM, UX, and engineering collaborate without editing files in a terminal and
+without duplicating work into JIRA/Aha.
 
 Open-core: self-host the core for free, or use the hosted SaaS.
 

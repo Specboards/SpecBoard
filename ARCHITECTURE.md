@@ -59,7 +59,8 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
   parser (`parseSpec`), status state machine (`canTransition`), `.specboard/config.yml`
   schema (`parseRepoConfig`). Unit-tested.
 - **`packages/db`** — Drizzle schema (`workspaces`, `members`, `repositories`,
-  `features`, `feature_links` (typed dependencies/relations between features),
+  `features` (with a self-referential `parent_id` for epic/sub-feature
+  hierarchy), `feature_links` (typed dependencies/relations between features),
   `spec_index`, `comments`, `activity_log`, the deployment-global
   `github_app` credential row, plus the Better Auth
   `users`/`sessions`/`accounts`/`verifications` tables) + Postgres client. RLS
