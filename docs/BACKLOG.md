@@ -33,6 +33,55 @@ The backlog below is the **gap** between that and what the four reference tools 
   cycles today).
 - Rows below are marked ✅ when done.
 
+## Next steps
+
+**Recommended implementation order** (next up first). #15 and #16 are done, so the
+remaining Tier 1 work plus the items #15 unblocked:
+
+1. **#20 First-class estimate/effort field** — now unblocked by hierarchy; small,
+   high-value, and a prerequisite for prioritization scoring (#21). Add an
+   `estimate` field with a workspace-configurable scale and roll it up over the
+   `parent_id` tree built in #15.
+2. **#17 Filtering & saved custom views** — biggest day-to-day usability win as the
+   backlog grows; no dependencies. Filter bar (status/assignee/priority/tag/parent)
+   + URL state, then persisted named views.
+3. **#18 Customizable workflow statuses** — unblocks realistic processes; touches
+   schema, board columns, MCP `update_status` validation, and needs a data migration
+   mapping the current 5 statuses.
+4. **#24 Bulk operations** — leans on #15 (bulk reparent) and #17 (select-all-in-filter).
+5. **#21 Prioritization scoring** — best after #20 (uses estimate as the effort term).
+
+Then proceed down Tiers 2–3 in the tables below. Re-confirm priority with the team
+before starting each item.
+
+**Open follow-ups on shipped work**
+
+- **#15** — collapse/expand toggle on the nested backlog (currently indented and
+  always-expanded); exclude descendants from the Parent picker (the server rejects
+  cycles, but the picker still lists them).
+- **#16** — none outstanding.
+
+**Build pattern to follow** (used for #15 and #16; keeps changes green and reviewable):
+`packages/db` schema + generated migration (add RLS for any new tenant table) →
+`apps/web/src/lib/store` types + **both** the `db` and `local` stores →
+`features-service` validation → `/api/v1` route(s) → `api-client` →
+feature-detail/board/backlog UI → `apps/mcp` enrichment → `pnpm typecheck && pnpm test
+&& pnpm build` → smoke-test in local file mode → apply the migration to test + prod.
+
+Migrations are **not** auto-applied on deploy. Apply manually per environment:
+`fly mpg proxy <cluster-id> -p <port>` (test cluster `z7y24od8vemrgqd1`, prod
+`1zqyxr7d791rwp8m`), then run `pnpm --filter @specboard/db migrate` with
+`DATABASE_URL` pointed at `127.0.0.1:<port>/fly-db` (creds from the app's
+`DATABASE_URL` secret).
+
+**Repo hygiene before merge**
+
+- The #15/#16 commits currently sit on `feat/email-verification-github-sync` (an
+  unrelated branch name). Move them to a dedicated branch (e.g. `feat/pm-table-stakes`)
+  before opening the PR, and **close issues #15 and #16 on merge**.
+- `pnpm lint` is broken environment-wide (`eslint` not installed) — run `pnpm install`
+  to restore it; build/typecheck/test are the working gates today.
+
 ## Prioritization tiers
 
 - **Tier 1 — Core PM table stakes.** Most essential to the prioritize/define-specs use case; the
