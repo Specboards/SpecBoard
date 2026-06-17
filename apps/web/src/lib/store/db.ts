@@ -2,11 +2,13 @@ import { extractSections, rollUpEstimates } from "@specboard/core";
 import {
   and,
   createDb,
+  desc,
   eq,
   featureLinks,
   features,
   inArray,
   or,
+  savedViews,
   sql,
   specIndex,
   users,
@@ -23,8 +25,22 @@ import {
   type FeatureStore,
   type RelationDirection,
   type RelationInput,
+  type SavedView,
+  type SavedViewFilters,
+  type SavedViewInput,
   type WorkspaceScope,
 } from "./types";
+
+/** Normalize the jsonb filters column into the typed filter bundle. */
+function toSavedViewFilters(value: unknown): SavedViewFilters {
+  const out: SavedViewFilters = {};
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === "string" || typeof v === "number") out[k] = v;
+    }
+  }
+  return out;
+}
 
 type LinkRow = {
   id: string;
@@ -410,6 +426,76 @@ export class DbStore implements FeatureStore {
           and(
             eq(featureLinks.id, linkId),
             eq(featureLinks.workspaceId, scope!.workspaceId),
+          ),
+        );
+    });
+  }
+
+  async listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]> {
+    return this.scoped(scope, async (tx) => {
+      const rows = await tx
+        .select({
+          id: savedViews.id,
+          name: savedViews.name,
+          view: savedViews.view,
+          filters: savedViews.filters,
+        })
+        .from(savedViews)
+        .where(
+          and(
+            eq(savedViews.workspaceId, scope!.workspaceId),
+            eq(savedViews.userId, scope!.userId),
+          ),
+        )
+        .orderBy(desc(savedViews.createdAt));
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        view: r.view,
+        filters: toSavedViewFilters(r.filters),
+      }));
+    });
+  }
+
+  async createSavedView(
+    input: SavedViewInput,
+    scope?: WorkspaceScope,
+  ): Promise<SavedView> {
+    return this.scoped(scope, async (tx) => {
+      const [row] = await tx
+        .insert(savedViews)
+        .values({
+          workspaceId: scope!.workspaceId,
+          userId: scope!.userId,
+          name: input.name,
+          view: input.view,
+          filters: input.filters,
+        })
+        .returning({
+          id: savedViews.id,
+          name: savedViews.name,
+          view: savedViews.view,
+          filters: savedViews.filters,
+        });
+      if (!row) throw new Error("Failed to create saved view.");
+      return {
+        id: row.id,
+        name: row.name,
+        view: row.view,
+        filters: toSavedViewFilters(row.filters),
+      };
+    });
+  }
+
+  async deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      await tx
+        .delete(savedViews)
+        .where(
+          and(
+            eq(savedViews.id, id),
+            eq(savedViews.workspaceId, scope!.workspaceId),
+            eq(savedViews.userId, scope!.userId),
           ),
         );
     });

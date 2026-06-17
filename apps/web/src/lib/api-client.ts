@@ -4,6 +4,8 @@ import type {
   CreatableRelationDirection,
   FeaturePatch,
   FeatureRelation,
+  SavedView,
+  SavedViewInput,
 } from "@/lib/store/types";
 
 /**
@@ -76,6 +78,35 @@ export async function removeRelation(
     throw new Error(body?.error ?? `Remove relation failed with ${res.status}`);
   }
   return body?.relations ?? [];
+}
+
+/** Save the current backlog filters as a named view. */
+export async function saveView(input: SavedViewInput): Promise<SavedView> {
+  const res = await fetch("/api/v1/views", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { view?: SavedView; error?: string }
+    | null;
+  if (!res.ok || !body?.view) {
+    throw new Error(body?.error ?? `Save view failed with ${res.status}`);
+  }
+  return body.view;
+}
+
+/** Delete a saved view by id. */
+export async function deleteView(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/views/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Delete view failed with ${res.status}`);
+  }
 }
 
 /**

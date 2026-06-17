@@ -119,6 +119,25 @@ export interface WorkspaceScope {
   workspaceId: string;
 }
 
+/** Serialized backlog filter bundle persisted with a saved view. */
+export type SavedViewFilters = Record<string, string | number>;
+
+/** A user's named, saved backlog filter ("custom view"). */
+export interface SavedView {
+  id: string;
+  name: string;
+  /** Which list it applies to (currently always "backlog"). */
+  view: string;
+  filters: SavedViewFilters;
+}
+
+/** Fields needed to create a saved view (id/createdAt are assigned by the store). */
+export interface SavedViewInput {
+  name: string;
+  view: string;
+  filters: SavedViewFilters;
+}
+
 /**
  * Storage boundary for the web app. Two implementations:
  * - `local`: reads specs from the filesystem, metadata in a JSON file —
@@ -146,6 +165,15 @@ export interface FeatureStore {
     linkId: string,
     scope?: WorkspaceScope,
   ): Promise<void>;
+  /** The acting user's saved backlog views (personal, newest first). */
+  listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]>;
+  /** Persist a new saved view for the acting user; returns it with its id. */
+  createSavedView(
+    input: SavedViewInput,
+    scope?: WorkspaceScope,
+  ): Promise<SavedView>;
+  /** Delete one of the acting user's saved views by id. */
+  deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void>;
 }
 
 /** Raised when a relation can't be created (self-link, cycle, unknown target). */

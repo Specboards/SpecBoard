@@ -155,6 +155,29 @@ export const comments = pgTable("comments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * A user's saved backlog filter ("custom view"): a named bundle of filter
+ * params they can re-apply. Personal — scoped to the creating user within their
+ * workspace, so each member curates their own list.
+ */
+export const savedViews = pgTable(
+  "saved_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    name: text("name").notNull(),
+    /** Which list the view applies to (currently always "backlog"). */
+    view: text("view").notNull().default("backlog"),
+    /** Serialized FeatureFilters (see apps/web feature-filters). */
+    filters: jsonb("filters").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("saved_views_ws_user_idx").on(t.workspaceId, t.userId)],
+);
+
 export const activityLog = pgTable("activity_log", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id")

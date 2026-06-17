@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -13,6 +14,8 @@ import {
   type FeatureStore,
   type RelationDirection,
   type RelationInput,
+  type SavedView,
+  type SavedViewInput,
   type WorkspaceScope,
 } from "./types";
 
@@ -100,6 +103,10 @@ export class LocalFileStore implements FeatureStore {
 
   private get metadataPath() {
     return path.join(this.root, ".specboard", "local-metadata.json");
+  }
+
+  private get viewsPath() {
+    return path.join(this.root, ".specboard", "local-views.json");
   }
 
   private async readMetadata(): Promise<MetadataFile> {
@@ -321,6 +328,49 @@ export class LocalFileStore implements FeatureStore {
       links: links.filter((l) => !(l.to === toSpec && l.type === type)),
     };
     await this.writeMetadata(meta);
+  }
+
+  // Saved views persist to `.specboard/local-views.json`. There's a single
+  // implicit user in local mode, so no per-user scoping.
+  private async readViews(): Promise<SavedView[]> {
+    try {
+      return JSON.parse(await fs.readFile(this.viewsPath, "utf8")) as SavedView[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeViews(views: SavedView[]): Promise<void> {
+    await fs.mkdir(path.dirname(this.viewsPath), { recursive: true });
+    await fs.writeFile(
+      this.viewsPath,
+      JSON.stringify(views, null, 2) + "\n",
+      "utf8",
+    );
+  }
+
+  async listSavedViews(_scope?: WorkspaceScope): Promise<SavedView[]> {
+    return this.readViews();
+  }
+
+  async createSavedView(
+    input: SavedViewInput,
+    _scope?: WorkspaceScope,
+  ): Promise<SavedView> {
+    const views = await this.readViews();
+    const view: SavedView = {
+      id: randomUUID(),
+      name: input.name,
+      view: input.view,
+      filters: input.filters,
+    };
+    await this.writeViews([view, ...views]); // newest first, matching db order
+    return view;
+  }
+
+  async deleteSavedView(id: string, _scope?: WorkspaceScope): Promise<void> {
+    const views = await this.readViews();
+    await this.writeViews(views.filter((v) => v.id !== id));
   }
 }
 
