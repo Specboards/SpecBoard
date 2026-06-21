@@ -69,6 +69,9 @@ export async function ListView({
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),
     priorities: [0, 1, 2, 3, 4],
+    products: productsById
+      ? products.map((p) => ({ id: p.id, name: p.name }))
+      : undefined,
   };
 
   const filtering = hasActiveFilters(filters);
