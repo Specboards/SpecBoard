@@ -22,7 +22,7 @@ commercially — subject to the terms of the Apache-2.0 license.
 ## Commercial features — separately licensed
 
 The following SaaS-oriented capabilities are **not** covered by the Apache-2.0
-grant and require a commercial agreement with SpecBoard. Where their code lives
+grant and require a commercial agreement with Studio Palouse. Where their code lives
 in this repository it is marked with a `LICENSE` notice in the relevant
 directory; otherwise it ships only in the hosted product.
 
@@ -37,7 +37,7 @@ directory; otherwise it ships only in the hosted product.
 
 These features power the hosted service at
 [specboard.ai](https://specboard.ai). For a commercial or self-managed
-enterprise license, contact **licensing@specboard.ai**.
+enterprise license, contact **contact@palouse.io**.
 
 ## Contributing
 
@@ -48,11 +48,11 @@ area, note that in your pull request so we can route it correctly.
 
 ## Trademarks
 
-"SpecBoard" and the SpecBoard logo are trademarks of SpecBoard. The Apache-2.0
-license does not grant trademark rights; see section 6 of the
+"SpecBoard" and the SpecBoard logo are trademarks of Studio Palouse. The
+Apache-2.0 license does not grant trademark rights; see section 6 of the
 [LICENSE](./LICENSE).
 
 ## Questions
 
 Anything unclear about how a particular use is licensed? Email
-**licensing@specboard.ai** before you build on it — we're happy to clarify.
+**contact@palouse.io** before you build on it — we're happy to clarify.

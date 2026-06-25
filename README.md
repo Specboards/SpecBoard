@@ -128,4 +128,4 @@ for any purpose, including commercially.
 A small set of SaaS-oriented features are licensed separately: multi-tenant
 hosting (`N>1`), SSO/SAML/SCIM, advanced analytics, premium integrations, and
 audit logs. See [LICENSING.md](./LICENSING.md) for the full breakdown, or contact
-**licensing@specboard.ai** for a commercial license.
+**contact@palouse.io** for a commercial license.
