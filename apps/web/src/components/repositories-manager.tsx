@@ -1,13 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
 import {
   connectRepository,
+  createStarterSpec,
   disconnectRepository,
+  importWorkspaceSpecs,
   listInstallationRepositories,
+  scanWorkspaceSpecs,
+  type ImportResult,
   type InstallationRepo,
+  type RepoScan,
+  type StarterSpecResult,
   type SyncResult,
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -19,6 +26,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useOrgProductPath } from "@/lib/use-org";
 
 export interface ConnectedRepo {
   id: string;
@@ -63,6 +71,10 @@ export function RepositoriesManager({
   installUrl,
   notice,
 }: RepositoriesManagerProps) {
+  // Bumped after a repo is connected so the import panel re-scans for new specs.
+  const [scanNonce, setScanNonce] = useState(0);
+  const bumpScan = useCallback(() => setScanNonce((n) => n + 1), []);
+
   return (
     <div className="mx-auto w-full max-w-xl space-y-6">
       <div>
@@ -87,6 +99,10 @@ export function RepositoriesManager({
 
       <RepoList repos={repos} canResync={canConnect && configured} canManage={canConnect} />
 
+      {canConnect && configured && repos.length > 0 ? (
+        <SpecImportPanel scanNonce={scanNonce} repos={repos} installUrl={installUrl} />
+      ) : null}
+
       {!canConnect ? (
         <p className="text-sm text-muted-foreground">
           {configured
@@ -94,13 +110,379 @@ export function RepositoriesManager({
             : "GitHub isn't set up yet. Ask an admin to connect SpecBoard to GitHub."}
         </p>
       ) : configured ? (
-        <ConnectSection installUrl={installUrl} connected={repos} />
+        <ConnectSection installUrl={installUrl} connected={repos} onConnected={bumpScan} />
       ) : selfHosted ? (
         <SetupGitHubCard />
       ) : (
         <HostedNotConfiguredCard />
       )}
     </div>
+  );
+}
+
+/**
+ * Onboarding "import your specs" step. After repos are connected (but not yet
+ * imported), this scans them read-only and asks the admin to confirm before
+ * creating cards. The smallest end-to-end slice of the spec-onboarding flow:
+ * scan -> prompt -> create -> view board. The empty state is the hook for the
+ * "no specs yet, let's build your first one" walkthrough (a later slice).
+ */
+function SpecImportPanel({
+  scanNonce,
+  repos,
+  installUrl,
+}: {
+  scanNonce: number;
+  repos: ConnectedRepo[];
+  installUrl: string | null;
+}) {
+  const router = useRouter();
+  const boardPath = useOrgProductPath();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [scan, setScan] = useState<{ repos: RepoScan[]; totalSpecs: number } | null>(null);
+  const [importing, startImport] = useTransition();
+  const [result, setResult] = useState<ImportResult | null>(null);
+
+  const rescan = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setScan(await scanWorkspaceSpecs());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't scan for specs.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Re-scan on mount and whenever a new repo is connected (scanNonce bump),
+  // clearing any prior import result so the prompt reflects the current repos.
+  useEffect(() => {
+    setResult(null);
+    void rescan();
+  }, [rescan, scanNonce]);
+
+  function runImport() {
+    startImport(async () => {
+      setError(null);
+      try {
+        const res = await importWorkspaceSpecs();
+        setResult(res);
+        router.refresh();
+        await rescan();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Import failed.");
+      }
+    });
+  }
+
+  const totalSpecs = scan?.totalSpecs ?? 0;
+  const scanErrors = (scan?.repos ?? []).filter((r) => r.error);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Import your specs</CardTitle>
+        <CardDescription>
+          We scan your connected repositories for <code>spec.md</code> files and turn each one into a
+          work item on your board. Nothing is created until you confirm.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading && !scan ? (
+          <p className="text-xs text-muted-foreground">Scanning your repositories for specs…</p>
+        ) : error ? (
+          <div className="space-y-2">
+            <p className="text-xs text-destructive">{error}</p>
+            <Button size="sm" variant="outline" onClick={() => void rescan()} disabled={loading}>
+              {loading ? "…" : "Try again"}
+            </Button>
+          </div>
+        ) : result ? (
+          <ImportResultView result={result} boardHref={boardPath("/backlog")} onRescan={() => void rescan()} />
+        ) : totalSpecs === 0 ? (
+          <EmptySpecsState
+            repos={repos}
+            boardHref={boardPath("/backlog")}
+            onRescan={() => void rescan()}
+            loading={loading}
+            installUrl={installUrl}
+          />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm">
+              We found <strong>{totalSpecs}</strong> spec{totalSpecs === 1 ? "" : "s"} across your
+              connected repositories.
+            </p>
+            <SpecScanList repos={scan!.repos} />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={runImport} disabled={importing}>
+                {importing ? "Creating…" : `Create ${totalSpecs} card${totalSpecs === 1 ? "" : "s"}`}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void rescan()} disabled={importing || loading}>
+                Rescan
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {scanErrors.length > 0 ? (
+          <div className="space-y-1 border-t pt-3">
+            {scanErrors.map((r) => (
+              <p key={r.repoId} className="text-xs text-destructive">
+                {r.owner}/{r.name}: {r.error}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The list of specs found by the scan, grouped by repo and capped for length. */
+function SpecScanList({ repos }: { repos: RepoScan[] }) {
+  const withSpecs = repos.filter((r) => r.specs.length > 0);
+  const CAP = 8;
+  return (
+    <div className="space-y-3">
+      {withSpecs.map((repo) => {
+        const shown = repo.specs.slice(0, CAP);
+        const extra = repo.specs.length - shown.length;
+        return (
+          <div key={repo.repoId} className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">
+              {repo.owner}/{repo.name}
+            </p>
+            <ul className="divide-y rounded-md border">
+              {shown.map((spec) => (
+                <li key={spec.path} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="min-w-0 truncate text-sm">{spec.title}</span>
+                  <code className="shrink-0 text-[11px] text-muted-foreground">{spec.path}</code>
+                </li>
+              ))}
+            </ul>
+            {extra > 0 ? (
+              <p className="text-xs text-muted-foreground">+{extra} more</p>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Shown after a successful import: the summary plus a link to the board. */
+function ImportResultView({
+  result,
+  boardHref,
+  onRescan,
+}: {
+  result: ImportResult;
+  boardHref: string;
+  onRescan: () => void;
+}) {
+  const { summary } = result;
+  const created = summary.featuresCreated;
+  const imported = summary.upserted;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">
+        Imported <strong>{imported}</strong> spec{imported === 1 ? "" : "s"}
+        {created > 0 ? (
+          <>
+            {" "}
+            and created <strong>{created}</strong> feature group{created === 1 ? "" : "s"}
+          </>
+        ) : null}
+        .
+      </p>
+      {result.errors.length > 0 ? (
+        <div className="space-y-1">
+          {result.errors.map((e) => (
+            <p key={`${e.owner}/${e.name}`} className="text-xs text-destructive">
+              {e.owner}/{e.name}: {e.error}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex items-center gap-2">
+        <Link href={boardHref}>
+          <Button size="sm">View your board</Button>
+        </Link>
+        <Button size="sm" variant="ghost" onClick={onRescan}>
+          Scan again
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * No specs found in the connected repos: the guided "build your first spec"
+ * walkthrough. Commits a starter `specs/<feature>/spec.md` into a connected repo
+ * and imports it, so a new admin gets a real card and feels the whole loop. On
+ * success it shows what was committed plus a link to the board.
+ */
+function EmptySpecsState({
+  repos,
+  boardHref,
+  onRescan,
+  loading,
+  installUrl,
+}: {
+  repos: ConnectedRepo[];
+  boardHref: string;
+  onRescan: () => void;
+  loading: boolean;
+  installUrl: string | null;
+}) {
+  const router = useRouter();
+  const [featureName, setFeatureName] = useState("");
+  const [repoId, setRepoId] = useState(repos[0]?.id ?? "");
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<StarterSpecResult | null>(null);
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const name = featureName.trim();
+    if (!name) {
+      setError("Give your first feature a name.");
+      return;
+    }
+    if (!repoId) {
+      setError("Pick a repository to add it to.");
+      return;
+    }
+    startTransition(async () => {
+      setError(null);
+      try {
+        const result = await createStarterSpec({ repoId, featureName: name });
+        setCreated(result);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't create the starter spec.");
+      }
+    });
+  }
+
+  if (created) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm">
+          Committed <code>{created.path}</code> and added it to your board. Edit the file in your
+          repo anytime, the card stays in sync.
+        </p>
+        <div className="flex items-center gap-2">
+          <Link href={boardHref}>
+            <Button size="sm">View your board</Button>
+          </Link>
+          <Button size="sm" variant="ghost" onClick={onRescan}>
+            Scan again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">We didn&apos;t find any specs in your connected repositories yet.</p>
+      <p className="text-xs text-muted-foreground">
+        Let&apos;s create your first one. We&apos;ll commit a starter{" "}
+        <code>specs/&lt;feature&gt;/spec.md</code> to your repo and turn it into a card, so you can
+        see how specs and the board stay in sync.
+      </p>
+      <form onSubmit={submit} className="space-y-3">
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Feature name</span>
+          <Input
+            value={featureName}
+            onChange={(e) => setFeatureName(e.target.value)}
+            placeholder="Checkout flow"
+            disabled={pending}
+          />
+        </label>
+        {repos.length > 1 ? (
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Repository</span>
+            <select
+              value={repoId}
+              onChange={(e) => setRepoId(e.target.value)}
+              disabled={pending}
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+            >
+              {repos.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.owner}/{r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm" disabled={pending}>
+            {pending ? "Creating…" : "Create my first spec"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onRescan}
+            disabled={pending || loading}
+          >
+            {loading ? "…" : "Rescan"}
+          </Button>
+        </div>
+      </form>
+      <CreateSpecRepoNudge installUrl={installUrl} />
+    </div>
+  );
+}
+
+/**
+ * Nudge for users who'd rather keep specs in their own repository. We can't
+ * create the repo for them (that needs a GitHub App permission we deliberately
+ * don't request), so we deep-link to GitHub's new-repo page prefilled with a
+ * sensible name, then walk them back through the existing install -> connect ->
+ * first-spec flow. Shown in the two "no suitable repo" moments: the connect
+ * section (nothing connected) and the empty-specs first-spec state.
+ */
+function CreateSpecRepoNudge({ installUrl }: { installUrl: string | null }) {
+  const newRepoUrl =
+    "https://github.com/new?name=specs&description=" +
+    encodeURIComponent("Product specs synced to SpecBoard");
+  return (
+    <details className="rounded-md border px-3 py-2">
+      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+        Prefer a dedicated repo just for specs?
+      </summary>
+      <div className="mt-3 space-y-3 text-xs text-muted-foreground">
+        <p>Keep your specs in their own repository, separate from application code.</p>
+        <ol className="list-decimal space-y-1 pl-4">
+          <li>
+            <a href={newRepoUrl} target="_blank" rel="noreferrer" className="underline">
+              Create a repo on GitHub
+            </a>{" "}
+            (we suggest naming it <code>specs</code>).
+          </li>
+          <li>
+            {installUrl ? (
+              <a href={installUrl} target="_blank" rel="noreferrer" className="underline">
+                Install SpecBoard
+              </a>
+            ) : (
+              "Install the SpecBoard GitHub App"
+            )}{" "}
+            on the new repo.
+          </li>
+          <li>Connect it here, then create your first spec.</li>
+        </ol>
+      </div>
+    </details>
   );
 }
 
@@ -207,7 +589,7 @@ function RepoRow({
           name: repo.name,
           defaultBranch: repo.defaultBranch,
         });
-        setStatus(syncMessage(sync));
+        setStatus(sync ? syncMessage(sync) : { kind: "ok", message: "Re-synced." });
         router.refresh();
       } catch (err) {
         setStatus({ kind: "error", message: err instanceof Error ? err.message : "Re-sync failed." });
@@ -301,9 +683,12 @@ function RepoRow({
 function ConnectSection({
   installUrl,
   connected,
+  onConnected,
 }: {
   installUrl: string | null;
   connected: ConnectedRepo[];
+  /** Called after a repo is connected, so the import panel re-scans. */
+  onConnected: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -362,11 +747,16 @@ function ConnectSection({
             installationId={installationId}
             repos={available}
             connectedKeys={connectedKeys}
-            onConnected={load}
+            onConnected={() => {
+              void load();
+              onConnected();
+            }}
           />
         ) : null}
 
         <ManualConnectForm />
+
+        {connected.length === 0 ? <CreateSpecRepoNudge installUrl={installUrl} /> : null}
       </CardContent>
     </Card>
   );
@@ -427,18 +817,16 @@ function PickerRow({
     startTransition(async () => {
       setStatus(null);
       try {
-        const { sync } = await connectRepository({
+        // Register the repo but defer importing specs; the "Import your specs"
+        // panel scans and asks for confirmation before creating cards.
+        await connectRepository({
           installationId,
           owner: repo.owner,
           name: repo.name,
           defaultBranch: repo.defaultBranch,
+          sync: false,
         });
-        const msg = syncMessage(sync);
-        setStatus(
-          msg.kind === "ok"
-            ? { kind: "ok", message: msg.message }
-            : { kind: "error", message: `Connected, but import failed: ${msg.message}` },
-        );
+        setStatus({ kind: "ok", message: "Connected. Scan for specs below." });
         router.refresh();
         onConnected();
       } catch (err) {
@@ -501,7 +889,7 @@ function ManualConnectForm() {
           name,
           defaultBranch: defaultBranch || undefined,
         });
-        const msg = syncMessage(sync);
+        const msg = sync ? syncMessage(sync) : { kind: "ok" as const, message: "Connected." };
         setStatus(
           msg.kind === "ok"
             ? { kind: "ok", message: `Connected. ${msg.message}.` }

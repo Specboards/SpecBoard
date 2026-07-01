@@ -308,6 +308,9 @@ export interface ConnectRepoInput {
   owner: string;
   name: string;
   defaultBranch?: string;
+  /** Run the initial import on connect. Defaults to true; the onboarding flow
+   *  passes false to defer importing behind an explicit confirmation. */
+  sync?: boolean;
 }
 
 /**
@@ -318,7 +321,7 @@ export interface ConnectRepoInput {
  */
 export async function connectRepository(
   input: ConnectRepoInput,
-): Promise<{ sync: SyncResult | { error: string } }> {
+): Promise<{ sync: SyncResult | { error: string } | null }> {
   const res = await fetch("/api/v1/repositories", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -326,12 +329,96 @@ export async function connectRepository(
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
-    | { sync?: SyncResult | { error: string }; error?: string }
+    | { sync?: SyncResult | { error: string } | null; error?: string }
     | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Connect failed with ${res.status}`);
   }
-  return { sync: body?.sync ?? { error: "No sync summary returned." } };
+  // null when the caller deferred the import (sync: false).
+  return { sync: body?.sync ?? null };
+}
+
+/** One connected repo's spec files found by a read-only scan (no import yet). */
+export interface RepoScan {
+  repoId: string;
+  owner: string;
+  name: string;
+  specs: { path: string; title: string; hasId: boolean }[];
+  error?: string;
+}
+
+/**
+ * Read-only scan of every connected repo for spec files, without importing.
+ * Backs the onboarding "found N specs, create cards?" prompt. Admin-only.
+ */
+export async function scanWorkspaceSpecs(): Promise<{ repos: RepoScan[]; totalSpecs: number }> {
+  const res = await fetch("/api/v1/repositories/scan");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { repos?: RepoScan[]; totalSpecs?: number; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Scan failed with ${res.status}`);
+  }
+  return { repos: body?.repos ?? [], totalSpecs: body?.totalSpecs ?? 0 };
+}
+
+/** The outcome of seeding a starter spec into a repo and importing it. */
+export interface StarterSpecResult {
+  path: string;
+  summary: SyncResult;
+}
+
+/**
+ * Commit a starter `spec.md` into a connected repo and import it, creating the
+ * workspace's first card. Backs the empty-state "build your first spec"
+ * walkthrough. Admin-only.
+ */
+export async function createStarterSpec(input: {
+  repoId: string;
+  featureName: string;
+}): Promise<StarterSpecResult> {
+  const res = await fetch("/api/v1/repositories/starter-spec", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { path?: string; summary?: SyncResult; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Couldn't create the starter spec (${res.status}).`);
+  }
+  return {
+    path: body?.path ?? "",
+    summary: body?.summary ?? { upserted: 0, skipped: 0, idsInjected: 0, featuresCreated: 0 },
+  };
+}
+
+/** The aggregated outcome of importing specs across all connected repos. */
+export interface ImportResult {
+  summary: SyncResult;
+  errors: { owner: string; name: string; error: string }[];
+}
+
+/**
+ * Import specs from every connected repo into the board (the "create cards"
+ * confirmation behind the onboarding scan). Admin-only.
+ */
+export async function importWorkspaceSpecs(): Promise<ImportResult> {
+  const res = await fetch("/api/v1/repositories/import", { method: "POST" });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { summary?: SyncResult; errors?: ImportResult["errors"]; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Import failed with ${res.status}`);
+  }
+  return {
+    summary: body?.summary ?? { upserted: 0, skipped: 0, idsInjected: 0, featuresCreated: 0 },
+    errors: body?.errors ?? [],
+  };
 }
 
 /**
